@@ -1,0 +1,8 @@
+{
+  "name": "gcs-blob-downloader",
+  "version": "0.0.1",
+  "dependencies": {
+    "@google-cloud/storage": "^5.8.4",
+    "md5-file": "^5.0.0"
+  }
+}
