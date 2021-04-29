@@ -6,35 +6,44 @@ function main(
   const {Storage} = require("@google-cloud/storage");
   const path = require("path");
   const fs = require("fs");
-  const md5File = require("md5-file");
 
   const storage = new Storage();
 
   async function listFilesByPrefix() {
-    const [files] = await storage.bucket(bucketName).getFiles({prefix: prefix});
-    console.log(`Found ${files.length} files`);
+    const [filesAndFolders] = await storage.bucket(bucketName).getFiles({prefix: prefix});
+    const files = filesAndFolders.filter(x => !x.name.endsWith("/"));
+    console.log(`Found ${files.length} file(s): ${files.map(x => x.name).join(",")}`);
     return files;
   }
 
-  async function checkExistsLocally(x, destination) {
-    if (!fs.existsSync(destination)) return false;
-    const md5LocalPromise = md5File(destination);
-    const [{md5Hash}] = await x.getMetadata();
-    const md5Local = Buffer.from(await md5LocalPromise, "hex").toString("base64");
+  async function checkExistsLocally(md5Hash, md5Destination) {
+    if (!fs.existsSync(md5Destination)) return false;
+    const md5Local = await fs.promises.readFile(md5Destination, {encoding: "utf-8"});
     console.log(`Local checksum ${md5Local} vs. remote ${md5Hash}`);
     return md5Local === md5Hash;
   }
 
+  async function maybeCreateParentDirectory(name) {
+    const dirname = path.dirname(name);
+    if(!fs.existsSync(dirname)) await fs.promises.mkdir(dirname, {recursive: true});
+  }
+
   async function maybeDownload(x) {
-    const destination = path.join(outputDir, path.relative(prefix, x.name))
-    if (await checkExistsLocally(x, destination)) {
+    const relativeName = path.relative(prefix, x.name);
+    const destination = path.join(outputDir, relativeName);
+    const md5Destination = path.join(outputDir, '.gcs-checksum', relativeName);
+    const [{md5Hash}] = await x.getMetadata();
+    if (await checkExistsLocally(md5Hash, md5Destination)) {
       console.log(`File ${x.name} already exists locally as ${destination}`)
       return;
     }
-    console.log(`Downloading file ${x.name} to ${destination}`)
-    return x.download({
+    console.log(`Downloading file ${x.name} to ${destination}`);
+    await maybeCreateParentDirectory(destination);
+    await x.download({
       destination: destination
     })
+    await maybeCreateParentDirectory(md5Destination);
+    await fs.promises.writeFile(md5Destination, md5Hash);
   }
 
   async function downloadByPrefix() {
